@@ -80,7 +80,7 @@ void TIM6_DAC_IRQHandler(void) {
 }
 ```
 
-Источники:
+**Источники:**
 * Лекции
 * [Статья 1](https://cxem.net/mc/mc250.php)
 
@@ -105,21 +105,133 @@ void TIM6_DAC_IRQHandler(void) {
 
 ## USART
 
+Универсальный синхронный/асинхронный трансивер (universal synchronous asynchronous receiver transmitter, **USART**) - протокол обмена данными. Любой двунаправленный обмен USART требует как минимум двух сигнальных выводов: входные принимаемые данные (Receive Data In, RX) и выходные передаваемые данные (Transmit Data Out, TX):
 
+**RX**: вход последовательных принимаемых данных. Используются техники передискретизации для восстановления данных, чтобы отделить полезные приходящие данные от шума.
+
+**TX**: выход передаваемых данных. Когда передатчик запрещен, ножка выхода возвратит свою конфигурацию порта ввода/вывода (GPIO). Когда передатчик разрешен и ничего не передается, уровень выхода ножки TX находится в лог. 1. В режимах single-wire и smartcard, этот вывод I/O используется и для передачи, и для приема данных (на уровне USART данные затем принимаются на SW_RX).
+[//]: ![USART](./img/stm32/USART_block_diagram.png)
+![](/img/stm32/USART_block_diagram_ru.png)
+Через эти выводы последовательные данные принимаются и передаются в нормальном режиме USART как фреймы. В этом процессе используется следующее:
+
+• Состояние ожидания линии (Idle Line) до передачи или приема.  
+• Start-бит.  
+• Слово данных (8 или 9 бит), самый младший бит слова (LSB) идет первым.  
+• 0.5,1, 1.5, 2 Stop-стоп-бит, показывающих завершение фрейма.  
+• Используется дробный генератор скорости - с 12-разрядной мантиссой и 4-битной дробной частью.  
+• Регистр статуса (USART_SR).  
+• Регистр данных (USART_DR).  
+• Регистр генератора скорости (USART_BRR) с 12-разрядной мантиссой и 4-битной дробной частью.  
+• Регистр защитного времени, Guardtime Register (USART_GTPR) в случае использования режима Smartcard.
+Пример временных диаграмм:
+[//]: ![](/img/stm32/USART_word_length_programming.png)
+![](/img/stm32/USART_word_length_programming_ru.png)
+
+**Дробный генератор скорости**. Скорость обмена (baud rate) для приемника и передатчика (обоих сигналов RX и TX) устанавливается в одинаковое значение, программируемое коэффициентами Mantissa и Fraction делителя USARTDIV.
+
+Формула 1. скорость для стандартного USART (включая режим SPI):
+$$\text{Tx/Rx baud} = \frac{f_{CK}}{8 \cdot (2 - OVER8)\cdot USARTDIV}$$
+Формула 2. скорость для режимов Smartcard, LIN и IrDA:
+$$\text{Tx/Rx baud} = \frac{f_{CK}}{16 \cdot USARTDIV}$$
+USARTDIV это число с фиксированной запятой без знака, закодированное в регистре USART_BRR.
+![](./img/stm32/USART_BR.png)
+Пины на stm32f4:
+![](./img/stm32/Figure_UART_PinPack.png)
+
+### Простая инициализация
+
+```C
+#define CPU_CLOCK SystemCoreClock
+#define MY_BDR 115200
+
+#define MYBRR (CPU_CLOCK / (16 * MY_BDR))
+
+void GPIO_init() {
+	// 1. Вкл. тактирование
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+	// 2. назначили пины
+	GPIOA->MODER |= (GPIO_MODER_MODER2_1 | GPIO_MODER_MODER3_1);
+	// Альтернативные функции
+	GPIOA->AFR[0] |= 0x77 << 8;
+}
+
+void USART_init() {
+	// 1. Вкл тактирование
+	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+	// 2. Задали частоту работы
+	USART2->BRR = MYBRR;
+	// 3. Настроили на чтение и запись
+	USART2->CR1 |= (USART_CR1_TE | USART_CR1_RE);
+	// 4. Установили STOP бит
+	USART2->CR2 |= (USART_CR2_STOP_1);
+	// 5. Вкл USART
+	USART2->CR1 |= USART_CR1_UE;
+}
+
+/* Чтение */
+uint8_t readUSART() {
+	uint8_t test_usart2_sr_1 = USART2->SR;
+    if ((USART2->SR & USART_SR_RXNE) == USART_SR_RXNE) {
+    	return USART2->DR;
+    }
+    return -1;
+}
+
+/* Запись */
+uint8_t writeUSART(uint8_t data) {
+	uint8_t test_usart2_sr_2 = USART2->SR;
+    if ((USART2->SR & USART_SR_TXE) == USART_SR_TXE) {
+    	USART2->DR = data;
+    	return 0;
+    }
+    return -1;
+}
+
+int main(void) {
+	SystemCoreClockUpdate();
+	GPIO_init();
+	USART_init();
+	uint8_t temp = 0x21;
+	while(1) {
+		writeUSART(temp);
+		for (int i = 0; i  < 50; i++);
+		uint8_t temp_read = readUSART();
+		// Вывод данных
+    	trace_printf("temp_read: %u\n", temp_read);
+		if (temp_read != 255) {
+			temp = ++temp % 254;
+		}
+	}
+}
+
+```
 
 ## DMA
 
+![](./img/stm32/DMA_DMA1_request_mapping_ch1.png)
+![](DMA_DMA1_request_mapping_ch2.png)
+![](./img/stm32/DMA_DMA2_request_mapping.png)
+
+
+**Источники:**
+* [Переведенный на русский язык Datasheat для stm32f429](https://arm-stm.blogspot.com/2016/10/stm32f-adc-with-dma-on-cmsis.html)
+* [Переведенный на русский язык Datasheat для USART](http://microsin.net/programming/arm/stm32f4xx-uart-and-usart.html)
+
 ### USART + DMA
 
+
+
 #### Полезные ссылки:
-- [ ] [Репозиторий с реализацией DMA через CMSIS.](https://github.com/rmkeyser11/Engs62_Final/blob/master/DMA.c)
+- [x] [ADC + DMA через CMSIS.](https://github.com/rmkeyser11/Engs62_Final/blob/master/DMA.c)**ШЛЯПА**
 - [ ] [DMA + USART на CMSIS, но на С++](https://github.com/MCLEANS/STM32F4-USART-DMA-CONFIGURATION/blob/master/IMPLEMENTATION/src/main.cpp)
-- [ ] [ADC + USART + DMA, на использует атрибуты еще какие то](https://github.com/mattmcf/ARM-microprocessor-WiFi-project/blob/master/ADC.c)
+- [x] [ADC + USART + DMA, на использует атрибуты еще какие то](https://github.com/mattmcf/ARM-microprocessor-WiFi-project/blob/master/ADC.c) **ШЛЯПА**
 - [X] [Рабочий вариант, данные перекидыватся, USART + DMA](https://github.com/PavelSchal/usart_dma_cmsis_stm32f407ve/blob/main/src_inc_extrahiert/dma.c)
-- [ ] [Еще один пример, нет задержок](https://github.com/ezydoez-ezrahogori/STM32F4_UART_TX_DMA/blob/main/20_uart_tx_dma/Src/uart.c)
-- [ ] [Опять на С++ пример](https://github.com/MCLEANS/STM32F4-USART-DMA-CONFIGURATION/blob/master/IMPLEMENTATION/src/USART.cpp)
+- [x] [Еще один пример, нет задержок](https://github.com/ezydoez-ezrahogori/STM32F4_UART_TX_DMA/blob/main/20_uart_tx_dma/Src/uart.c)**ШЛЯПА**
 - [x] [Для ADC + DMA работает, но не USART](https://github.com/Saileshmurali/Register-Level-ADC-DMA-STM32F4-DISC1/blob/main/main.c)
-- [x] [Шляпа какая-то](https://github.com/erenkeskin/STM32F4-Examples-with-Register/blob/master/STM32F4_USART/USART.c)
+- [x] [Шляпа какая-то](https://github.com/erenkeskin/STM32F4-Examples-with-Register/blob/master/STM32F4_USART/USART.c)**ШЛЯПА**
+* [ ] [Денис, DMA + USART для F0](https://github.com/DenisOffor/USART_DMA_LEARNING/blob/main/UART_DMA_learning/src/main.c)
+* [ ] [Англиский сайт](https://arm-stm.blogspot.com/2016/10/stm32f-adc-with-dma-on-cmsis.html)*ХЗ*
+
 
 ## ADC
 
@@ -135,7 +247,19 @@ void TIM6_DAC_IRQHandler(void) {
 
  
 
-
+```C
+/** @addtogroup Exported_macro
+  * @{
+  */
+#define SET_BIT(REG, BIT)     ((REG) |= (BIT)) 
+#define CLEAR_BIT(REG, BIT)   ((REG) &= ~(BIT)) 
+#define READ_BIT(REG, BIT)    ((REG) & (BIT)) 
+#define CLEAR_REG(REG)        ((REG) = (0x0)) 
+#define WRITE_REG(REG, VAL)   ((REG) = (VAL)) 
+#define READ_REG(REG)         ((REG)) 
+#define MODIFY_REG(REG, CLEARMASK, SETMASK)  WRITE_REG((REG), (((READ_REG(REG)) & (~(CLEARMASK))) | (SETMASK)))
+#define POSITION_VAL(VAL)     (__CLZ(__RBIT(VAL))) 
+```
 
 
 
