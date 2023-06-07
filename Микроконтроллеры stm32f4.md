@@ -135,7 +135,9 @@ $$\text{Tx/Rx baud} = \frac{f_{CK}}{8 \cdot (2 - OVER8)\cdot USARTDIV}$$
 $$\text{Tx/Rx baud} = \frac{f_{CK}}{16 \cdot USARTDIV}$$
 USARTDIV это число с фиксированной запятой без знака, закодированное в регистре USART_BRR.
 ![](./img/stm32/USART_BR.png)
+
 Пины на stm32f4:
+
 ![](./img/stm32/Figure_UART_PinPack.png)
 
 ### Простая инициализация
