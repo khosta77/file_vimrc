@@ -30,6 +30,66 @@ GPIOx->IDR |= (0x1 << 'pin');  //GPIO_IDR_IDx;
 T temp = (((GPIOx->IDR) >> 'pin') & 0x00000001);  // считать значение
 ```
 
+## EXTI
+
+Внешние прерывания. Прежде всего необходимо разобраться с тем, что такое прерывания.  
+В МК Cortex-M есть два понятия, которые часто путают *Interrupt* и *Event*.  
+*Event* — это событие (аппаратное или программное), на которое могут реагировать ядро или периферийные блоки. Одним из вариантов реакции может быть — прерывание.  
+*Interrupt* — это прерывание работы программы и переход управления в специализированный участок обработчик прерывания. 
+  
+Взаимосвязь между *Event* и *Interrupt* заключается в следующем:  
+*Каждый Interrupt вызывается Event, но не каждый Event вызывает Interrupt.*   
+Помимо прерываний, события могут активировать и другие возможности МК.
+
+```C
+//// Настройка порта прерывания
+// 1. Включение тактрования
+RCC->AHB1ENR |= RCC_AHB1ENR_GPIOxEN;
+// 2. Настройка на чтение
+GPIOx->MODER &= ~(0x03 << (2 * PIN));
+// 3. Настраиваем работу на понижение или повышение ввода(в примере понижение)
+GPIOx->PUPDR |= (0x1 << (2 * PIN + 1));
+
+//// Настраиваем прерывание
+// 1. Снимите маску с прерывания
+EXTI->IMR |= (1 << PIN);
+// 2. Установите, будет ли опускающаяся кромка или поднимающаяся кромка(опускающаяся)
+EXTI->FTSR |= (1 << PIN);
+// 3. Разрешение прерывания
+EXTI->PR |= (1 << PIN);
+
+//// SYSCFG
+// 1. Включаем тактирование SYSC
+RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+// 2. Настраиваем Регистр конфигурации внешнего прерывания SYSCFG пина
+SYSCFG->EXTICR[y] &= ~(0xF << PIN);
+// (12.06.23) - эти точки детально смотреть в документации
+
+//// Включаем прерывания
+NVIC_EnableIRQ('EXTI1_IRQn');
+```
+
+Прерывания делятся на группы:
+* Пины: *0*         NVIC: **EXTI0_IRQn**
+* Пины: *1*         NVIC: **EXTI1_IRQn**
+* Пины: *2*        NVIC: **EXTI2_IRQn**
+* Пины: *3*        NVIC: **EXTI3_IRQn**
+* Пины: *4*        NVIC: **EXTI4_IRQn**
+* Пины: *5-9*    NVIC: **EXTI9_5_IRQn**
+* Пины: *10-15* NVIC: **EXTI15_10_IRQn**
+Структура прерывания:
+```C
+void EXTI'1'_IRQHandler(void){
+	if((EXTI->PR & EXTI_PR_PRx) != 0x00){
+		// DO SOMTHING...
+		EXTI->PR |= EXTI_PR_PRx;
+	}
+}
+```
+
+**Источники:**
+* [нормальный чувак](https://github.com/sss22213/stm32f4_exti0_experience/blob/master/blink.c)
+
 ## TIM
 
 Таймер в микроконтроллере это счетчик, который как только досчитывает до заданного временного значения генерирует прерывание. Счетчик находится отдельно от ядра и не использует его ресурсы, в отличии от прерывания. 
@@ -99,6 +159,18 @@ void TIM6_DAC_IRQHandler(void) {
 
 ![](./img/stm32/General_purpos_timer_block_diagram_TIM9_a_TIM12.png)
 ![](./img/stm32/General_purpose_timer_block_diagram_TIM10_11_13_14.png =100x0)
+
+### ШИМ
+
+https://github.com/acakbudak/stm32f4_pwm/blob/master/stm32f44re_pwm.c
+https://github.com/jrsa/stm32f4_pwm/blob/master/main.c
+https://github.com/srchauhan97/PWM_in_STM32F407/blob/master/Timers_PWM/main.c
+https://github.com/MCLEANS/STM32F4_PWM_CONFIGURATION/blob/master/IMPLEMENTATION/src/PWM.cpp
+https://github.com/MCLEANS/LED_FADE_STM32F4/blob/master/main.cpp
+https://github.com/Dogukan1412/STM32F407-TIMER-CCP-PWM-REGISTER-CODING/blob/main/TIMER_CCP_PWM_Register_Coding/src/main.c
+
+https://github.com/search?q=stm32f4_PWM&type=repositories&p=6 (остановился)
+
 ## flash
 
 **05.06.23** поговорим позже
