@@ -162,14 +162,83 @@ void TIM6_DAC_IRQHandler(void) {
 
 ### ШИМ
 
-https://github.com/acakbudak/stm32f4_pwm/blob/master/stm32f44re_pwm.c
-https://github.com/jrsa/stm32f4_pwm/blob/master/main.c
-https://github.com/srchauhan97/PWM_in_STM32F407/blob/master/Timers_PWM/main.c
-https://github.com/MCLEANS/STM32F4_PWM_CONFIGURATION/blob/master/IMPLEMENTATION/src/PWM.cpp
-https://github.com/MCLEANS/LED_FADE_STM32F4/blob/master/main.cpp
-https://github.com/Dogukan1412/STM32F407-TIMER-CCP-PWM-REGISTER-CODING/blob/main/TIMER_CCP_PWM_Register_Coding/src/main.c
+**Широтно-импульсная модуляция** (ШИМ, pulse-width modulation (PWM)) — процесс управления мощностью методом пульсирующего включения и выключения потребителя энергии.
+![](./img/PWM.png)
 
-https://github.com/search?q=stm32f4_PWM&type=repositories&p=6 (остановился)
+Сигнал ШИМ характеризуется скважностью **S** или её обратно величиной - коэффициент заполнения **D**. 
+$$S = \frac{T}{\tau} = \frac{1}{D}$$
+Будет полезно вспомнить формулу для периода таймера:
+$$ t = (\text{ARR} \cdot \text{PSC})\frac{1}{F_{sys}} $$
+Пример плавного повышения яркости светодиода:
+```C
+#define PIN 12  // Номер пина
+#define S 1     // длительности импульса в циклах, по умолчанию
+
+/*  Прерывание надо для плавного увеличения ШИМ, но в целом можно и без него,
+ *  а рализовать отдельными функциями. В данном случае, светодиод не будет мигать,
+ *  а будет плавно загоратся.
+ * */
+void TIM4_IRQHandler(void) {
+    // 0. Снимаем маркер прервыания
+	TIM4->SR &= ~TIM_SR_UIF;
+	
+    // 1. Выключаем таймер для его редактирования
+	TIM4->CR1 &= ~TIM_CR1_CEN;
+	
+    // 2. Увеличиваем длительность импульса
+    if (TIM4->CCR1 != 200)
+        TIM4->CCR1 += 1;
+    else
+        TIM4->CCR1 = S;
+        
+    // 3. Запускаем таймер
+    TIM4->CR1 |= TIM_CR1_CEN;
+}
+
+int main(void) {
+    //// Настраиваем порт светодиода
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
+    
+    // 0. ШИМ назначается на альтернативную функцию
+    GPIOD->MODER |= (0x2 << (2 * PIN));
+    GPIOD->AFR[1] |= (0x2 << 16); 
+    
+    //// Настравиваем ШИМ на таймере
+    // 0. включаем тактирование нужного таймера
+    RCC->APB1ENR |= RCC_APB1ENR_TIM4EN;
+
+    // 1. Настраиваем период срабатывания таймера
+    TIM4->PSC = 3000;
+    TIM4->ARR = 100;
+    
+    ////  Настраиваем "захват/сравнение
+    // 2. Тут включается PWM1, строка OC1M"
+    TIM4->CCMR1 |= 0x60;
+    
+    // 3. Установка длительности импульса в циклах
+    TIM4->CCR1 = S;
+    
+    // 4. Включение CC1
+    TIM4->CCER |= 0x1;
+    
+    // *. Включаем прерывание
+    TIM4->DIER |= TIM_DIER_UIE;    
+    NVIC_EnableIRQ(TIM4_IRQn);
+    NVIC_SetPriority(TIM4_IRQn, 2);
+    
+    // 5. Запускаем таймер
+    TIM4->CR1 |= TIM_CR1_CEN;
+    
+    while(1);
+}
+```
+
+**Источники:**
+* [Формула скважности](https://yarllo.ru/wp-content/uploads/3/a/e/3ae4a94bc1267fe8774fdb8bfcbd92de.jpeg)
+* [Альтернативные функции на пинах GPIO](http://microsin.net/programming/arm/stm32f407-gpio-pins-alternate-function.html)
+* [Хороший человек с github](https://github.com/jrsa/stm32f4_pwm/blob/master/main.c)
+* [Ещё один пример использования](https://github.com/acakbudak/stm32f4_pwm/blob/master/stm32f44re_pwm.c)
+[//]: [Остановился, при поиске](https://github.com/search?q=stm32f4_PWM&type=repositories&p=6)
 
 ## flash
 
