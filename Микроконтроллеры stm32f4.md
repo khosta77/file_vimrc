@@ -163,6 +163,7 @@ void TIM6_DAC_IRQHandler(void) {
 ### ШИМ
 
 **Широтно-импульсная модуляция** (ШИМ, pulse-width modulation (PWM)) — процесс управления мощностью методом пульсирующего включения и выключения потребителя энергии.
+
 ![](./img/stm32/PWM.png)
 
 Сигнал ШИМ характеризуется скважностью **S** или её обратно величиной - коэффициент заполнения **D**. 
@@ -238,6 +239,7 @@ int main(void) {
 * [Альтернативные функции на пинах GPIO](http://microsin.net/programming/arm/stm32f407-gpio-pins-alternate-function.html)
 * [Хороший человек с github](https://github.com/jrsa/stm32f4_pwm/blob/master/main.c)
 * [Ещё один пример использования](https://github.com/acakbudak/stm32f4_pwm/blob/master/stm32f44re_pwm.c)
+
 [//]: [Остановился, при поиске](https://github.com/search?q=stm32f4_PWM&type=repositories&p=6)
 
 ## flash
@@ -503,33 +505,193 @@ int main(void) {
 		}
 	}
 }
-
 ```
 
-## DMA
+### USART + DMA
 
+Просто USART не рационально использовать, так как можно потерять данные при передаче или долго их ожидать. Стоит использовать связку DMA + USART.
+
+```C
+#define CPU_CLOCK SystemCoreClock
+#define MY_BDR 115200
+
+#define MYBRR (CPU_CLOCK / (16 * MY_BDR))
+
+void GPIO_init() {
+    // 0. Вкл. тактирование
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    // 1. Назначили пины на альтернативный режим работы
+    GPIOA->MODER |= (GPIO_MODER_MODER2_1 | GPIO_MODER_MODER3_1 | GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1);
+    // 2. Альтернативные функции
+    GPIOA->AFR[0] |= (0x77 << 8);
+    GPIOA->AFR[1] |= (0x77 << 4);
+
+    // Включаем светодиоды
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
+    GPIOD->MODER |= (GPIO_MODER_MODER12_0 | GPIO_MODER_MODER13_0);
+}
+
+void USART_init() {
+    //// включаем USART2 PA2, PA3
+    // 0. Вкл тактирование
+    RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+    // 1. Задали частоту работы
+    USART2->BRR = MYBRR;
+    // 2. Настроили на чтение и запись
+    USART2->CR1 |= (USART_CR1_TE | USART_CR1_RE);
+    // 3. Установили STOP бит
+    USART2->CR2 |= (USART_CR2_STOP_1);
+    // 4. Включили DMA для USART
+    USART2->CR3 |= (USART_CR3_DMAR | USART_CR3_DMAT);
+    // 5. Вкл USART
+    USART2->CR1 |= USART_CR1_UE;
+
+    //// Включаем USART1 PA9, PA10
+    // Аналогично, как и для USART2, только USART2->USART1
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+    USART1->BRR = MYBRR;
+    USART1->CR1 |= (USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE);
+    USART1->CR2 |= (USART_CR2_STOP_1);
+    USART1->CR3 |= (USART_CR3_DMAR | USART_CR3_DMAT);
+    USART1->CR1 |= USART_CR1_UE;
+}
+
+#define SIZE 128
+
+uint8_t usart1_receive_buffer[(2 * SIZE)];
+uint8_t usart2_receive_buffer[(2 * SIZE)];
+
+void DMA1_Stream6_IRQHandler(void) {
+    if ((DMA1->HISR & DMA_HISR_TCIF6) == DMA_HISR_TCIF6) {
+        GPIOD->ODR ^= GPIO_ODR_OD12;
+        DMA1->HIFCR |= DMA_HIFCR_CTCIF6;
+    }
+}
+
+void DMA2_Stream2_IRQHandler(void) {
+    if ((DMA2->LISR & DMA_LISR_TCIF2) == DMA_LISR_TCIF2) {
+        GPIOD->ODR ^= GPIO_ODR_OD13;
+        DMA2->LIFCR |= DMA_LIFCR_CTCIF2;
+    }
+}
+
+void DMA_init() {
+    // DMA1_Stream6 это USART2_TX
+    // DMA2_Stream2 это USART1_RX
+
+    // 0. Включили тактирование DMA
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+
+    // 1. Выбираем канал
+    DMA1_Stream6->CR |= (0x4 << 25);  // Канал 4
+    DMA2_Stream2->CR |= (0x4 << 25);  // Канал 4
+    
+    // 2. Устанавливаем размер ячейки (8-бит(можно 16-бит, 32-бит))
+    DMA1_Stream6->CR &= ~DMA_SxCR_MSIZE;
+    DMA2_Stream2->CR &= ~DMA_SxCR_MSIZE;
+
+    // 3. Установите размер периферийных данных равным 8 битам
+    DMA1_Stream6->CR &= ~DMA_SxCR_PSIZE;
+    DMA2_Stream2->CR &= ~DMA_SxCR_PSIZE;
+
+    // 4. Установите режим увеличения объема памяти
+    DMA1_Stream6->CR |= DMA_SxCR_MINC;
+    DMA2_Stream2->CR |= DMA_SxCR_MINC;
+
+    // 5. Включаем режим работы
+    DMA1_Stream6->CR |= (0x01<<6);  // Из памяти в перефирию
+    DMA2_Stream2->CR &= ~(3UL<<6);  // Из переферии в память
+
+    // 6. Включить циклическую запись
+    DMA1_Stream6->CR |= DMA_SxCR_CIRC;
+    DMA2_Stream2->CR |= DMA_SxCR_CIRC;
+
+    // 7. Включаем прерывания
+    DMA1_Stream6->CR |= DMA_SxCR_TCIE;
+    DMA2_Stream2->CR |= DMA_SxCR_TCIE;
+
+    // 8. Количество элементов данных, подлежащих передаче	
+    DMA1_Stream6->NDTR = SIZE;
+    DMA2_Stream2->NDTR = SIZE;
+
+    // 9. Задаем адрес переферии
+    DMA1_Stream6->PAR = (uint32_t)(&USART2->DR);
+    DMA2_Stream2->PAR = (uint32_t)(&USART1->DR);
+
+    // 10. Задаем адрес памяти
+    DMA1_Stream6->M0AR = (uint32_t)&usart2_receive_buffer[0];
+    DMA2_Stream2->M0AR = (uint32_t)&usart1_receive_buffer[0];
+
+    // 11. Настройка прерываний
+    NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+    NVIC_SetPriority(DMA1_Stream6_IRQn, 5);
+
+    NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+    NVIC_SetPriority(DMA2_Stream2_IRQn, 4);
+
+    // 12. Включаем DMA
+    DMA1_Stream6->CR |= DMA_SxCR_EN;
+    DMA2_Stream2->CR |= DMA_SxCR_EN;
+    // Включение DMA происходит только после того, как мы инициализировали GPIO и USART
+    // И не надо его выключать и включать после, он уже работает в цикле.
+}
+
+void USART_DMA_init() {
+    SystemCoreClockUpdate();
+    GPIO_init();
+    USART_init();
+    DMA_init();
+}
+
+void write_dma(uint8_t *df, uint16_t size) {
+    for (uint16_t i = 0; i < size; i++) {
+        *(usart2_receive_buffer + i) = *(df + i);
+    }
+}
+
+void read_dma(uint8_t *df, uint16_t size) {
+    for (uint16_t i = 0; i < size; i++) {
+        *(df + i) = *(usart1_receive_buffer + i);
+    }
+}
+```
+
+* [Рабочий вариант](https://github.com/khosta77/stm32f4_USART_DMA_CMSIS/blob/main/src/main.c)
+
+## DMA
+Прямой доступ к памяти (от англ. *Direct Memory Access*, *DMA*) – технология прямого доступа к памяти, минуя центральный процессор. Вся ее суть заключается в том, чтобы по команде от периферии или ядра взять и скопировать кусок памяти с одного места на другой.
+
+Структура одного блока DMA, в stm32f4 их 2:
+![](./img/stm32/DMA_block_diagram.png)
+
+Взаимодействие блоков DMA:
+
+![](./img/stm32/DMAs.png)
+
+Один блок DMA имеет 8 потоков(Stream), а каждый поток имеет 8 каналов(Channel). Активных потоков может быть, хоть все 8, но канал на них выбран только 1. Таблица с даннными о потоках и каналах:
 ![](./img/stm32/DMA_DMA1_request_mapping_ch1.png)
 ![](DMA_DMA1_request_mapping_ch2.png)
 ![](./img/stm32/DMA_DMA2_request_mapping.png)
+*P.s. вот эта таблица для stm32f40x, stm32f41x и stm32f42xx, stm32f43xx - ну для них просто добавляются некоторые дополнительные данные.*
 
+Что касается взаимодействия DMA с периферией, то там где это уместно приведен пример использования DMA.
 
 **Источники:**
 * [Переведенный на русский язык Datasheat для stm32f429](https://arm-stm.blogspot.com/2016/10/stm32f-adc-with-dma-on-cmsis.html)
 * [Переведенный на русский язык Datasheat для USART](http://microsin.net/programming/arm/stm32f4xx-uart-and-usart.html)
 
-### USART + DMA
-
-
-
 #### Полезные ссылки:
-- [ ] [DMA + USART на CMSIS, но на С++](https://github.com/MCLEANS/STM32F4-USART-DMA-CONFIGURATION/blob/master/IMPLEMENTATION/src/main.cpp)
+- [x] [DMA + USART на CMSIS, но на С++](https://github.com/MCLEANS/STM32F4-USART-DMA-CONFIGURATION/blob/master/IMPLEMENTATION/src/main.cpp)
 - [x] [ADC + USART + DMA, на использует атрибуты еще какие то](https://github.com/mattmcf/ARM-microprocessor-WiFi-project/blob/master/ADC.c) **ШЛЯПА**
 - [X] [Рабочий вариант, данные перекидыватся, USART + DMA](https://github.com/PavelSchal/usart_dma_cmsis_stm32f407ve/blob/main/src_inc_extrahiert/dma.c)
 - [x] [Еще один пример, нет задержок](https://github.com/ezydoez-ezrahogori/STM32F4_UART_TX_DMA/blob/main/20_uart_tx_dma/Src/uart.c)**ШЛЯПА**
 - [x] [Шляпа какая-то](https://github.com/erenkeskin/STM32F4-Examples-with-Register/blob/master/STM32F4_USART/USART.c)**ШЛЯПА**
-* [ ] [Денис, DMA + USART для F0](https://github.com/DenisOffor/USART_DMA_LEARNING/blob/main/UART_DMA_learning/src/main.c)
-* [ ] [Англиский сайт](https://arm-stm.blogspot.com/2016/10/stm32f-adc-with-dma-on-cmsis.html)*ХЗ*
-
+* [x] [Денис, DMA + USART для F0](https://github.com/DenisOffor/USART_DMA_LEARNING/blob/main/UART_DMA_learning/src/main.c)
+* [x] [Англиский сайт](https://arm-stm.blogspot.com/2016/10/stm32f-adc-with-dma-on-cmsis.html)*ХЗ*
+**Ну последение сайты, которые смотрел**
+* [x] [Почти работает](https://github.com/PavelSchal/usart_dma_cmsis_stm32f407ve/blob/main/src_inc_extrahiert/SysClock.c)
+* [x] [С прерываниями](https://github.com/ezydoez-ezrahogori/STM32F4_UART_TX_DMA/blob/main/20_uart_tx_dma/Src/main.c)
 
 ## ADC
 Аналого цифровой преобразователь (analog-to-digital converters, **ADC**) - устройство, преобразующее входной аналоговый сигнал в дискретный код (цифровой сигнал).
@@ -663,18 +825,18 @@ void ADC_init(){
     ADC1->CR2 |= ADC_CR2_SWSTART;
 }
 ```
-
-
+*Есть проблема в коде выше, инициализация происходит последовательно с GPIO. То есть нельзя сделать так, чтобы через DMA данные записывались в массив не с нулевого GPIO.*
 
 **Источники:**
 * [Отличная статья на хабре](https://habr.com/ru/articles/125029/)
 * [Дополнение к статье](https://baumanka.pashinin.com/IU1/sem10/Управляющие%20ЭВМ%20и%20комплексы%20(Суханов)/_4_2011.pdf)
 * [Переведенная документация](http://microsin.net/programming/arm/stm32f429-analog-to-digital-converters.html)
-* 
+
 #### Полезные ссылки:
 - [ ] [ADC + DMA через CMSIS.](https://github.com/rmkeyser11/Engs62_Final/blob/master/DMA.c)
 - [ ] [Простой пример использования ADC](https://github.com/lamer0k/Lections/blob/master/Lection6.adoc)
-- [ ] [Для ADC + DMA работает, но не USART](https://github.com/Saileshmurali/Register-Level-ADC-DMA-STM32F4-DISC1/blob/main/main.c)
+- [ ] [Для ADC + DMA работает](https://github.com/Saileshmurali/Register-Level-ADC-DMA-STM32F4-DISC1/blob/main/main.c)
+- [ ] [Пример использования АЦП без ДМА](https://github.com/donRumata03/STM32F4-CMSIS-lessons/blob/master/ADC_Regular_Channels/ADC.c)
 
 ## DAC
 
@@ -686,12 +848,9 @@ void ADC_init(){
 
 ## LTDC
 
- 
+## Набор красивых макросов
 
 ```C
-/** @addtogroup Exported_macro
-  * @{
-  */
 #define SET_BIT(REG, BIT)     ((REG) |= (BIT)) 
 #define CLEAR_BIT(REG, BIT)   ((REG) &= ~(BIT)) 
 #define READ_BIT(REG, BIT)    ((REG) & (BIT)) 
