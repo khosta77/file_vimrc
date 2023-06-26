@@ -14,8 +14,6 @@
 
 ![](./img/stm32/Basic_structure_of_a_five_volt_tolerant_GPIO.png)
 
-
-
 ```C
 // 1. Включение тактирования
 RCC->AHB1ENR |= RCC_AHB1ENR_GPIOxEN;
