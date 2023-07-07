@@ -838,6 +838,46 @@ void ADC_init(){
 
 ## DAC
 
+**Цифро-Аналоговый преобразователь** - 12 разрядный, как и **ADC** в тонокости работы документация не углуюлялась и в данных момент (07.07.23) я тоже. Схема:
+
+![](./img/stm32/DAC_block_diadram.png)
+
+Нюанс в работу всплыл, что кроме *PA5* и *PA4* нельзя настроить аналоговый канал.
+
+```C
+#define DELAY(count) {for (int time = 0; time < count; time++);}
+
+/*
+ *  Не уверен точно, но похоже аналовый сигнал может выходить только с ноги PA5 и PA4
+ * */
+
+int main(void) {
+    //// GPIO init
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    GPIOA->MODER |= ((GPIO_MODER_MODER5_1 | GPIO_MODER_MODER5_0) |
+                     (GPIO_MODER_MODER4_1 | GPIO_MODER_MODER4_0));
+
+    //// DAC init
+    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+    DAC->CR |= ((DAC_CR_EN1) | (DAC_CR_EN2));
+
+    while (1) {
+        GPIOD->ODR ^= GPIO_ODR_OD12;
+        for (uint16_t i = 0, j = 4096; (i < 4096) && (j > 0); i++, j--) {
+            DAC->DHR12R1 = i;
+            DAC->DHR12R2 = j;
+            DELAY(1600);
+        }
+    }
+}
+```
+
+**Источники:**
+* [Переведенная документаци](http://microsin.net/programming/arm/stm32f4xx-digital-to-analog-converter.html)
+* [github1](https://github.com/goktugh/Arduino-Stm32f407-Dac/blob/master/src/Dac_STM32.cpp)
+* [github2](https://github.com/dogukan-bicer/stm32f407_discovery_dac_registers/blob/main/main.c)
+* [github3](https://github.com/Dogukan1412/STM32F407-DAC-EXAMPLE-REGISTER-CODING/blob/main/DAC_Register_Coding/src/main.c)
+
 ## SPI
 
 ## I2C
