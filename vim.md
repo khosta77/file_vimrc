@@ -48,6 +48,7 @@ Plugin 'scrooloose/nerdtree'
 Plugin 'flazz/vim-colorschemes'
 Plugin 'tpope/vim-surround'
 Plugin 'octol/vim-cpp-enhanced-highlight'
+Plugin 'fatih/vim-go'
 
 " Все ваши плагины должны быть добавлены перед следующей строкой
 call vundle#end()
@@ -92,10 +93,10 @@ set backspace=indent,eol,start whichwrap+=<,>,[,]
 set showtabline=1      " Вырубаем черточки на табах
 
 " Включить обозначение пробелов
-" "set list lcs=tab:>\ ,space:. 
+"set list lcs=tab:>\ ,space:. 
 "set list
-"set lcs+=space:·
-
+set lcs+=space:·
+ 
 """ Подсветка синтаксиса
 " Подсвечиваем все что можно подсвечивать в Python
 let python_highlight_all = 1
@@ -146,6 +147,10 @@ autocmd filetype css set noexpandtab
 " python-файлы
 " Не расставлять отступы в стиле С
 autocmd filetype python set nocin
+
+" go-файлы
+" Будем и go файлах отступы делать
+autocmd filetype go set cin
 
 " NERDTree
 " Открывать дерево по нажаить Ctrl+n
